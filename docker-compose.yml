@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  coordinator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: corMiddle
+    ports:
+      - "6000:6000"
+    environment:
+      - SERVICE_NAME=Coordinator
+    networks:
+      - distributed_net
+
+  branch1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bRanch1
+    depends_on:
+      - coordinator
+    environment:
+      - SERVICE_NAME=Branch1
+    networks:
+      - distributed_net
+
+  branch2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bRanch2
+    depends_on:
+      - coordinator
+    environment:
+      - SERVICE_NAME=Branch2
+    networks:
+      - distributed_net
+
+  resource:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: resourceManager
+    ports:
+      - "1000:1000"
+    environment:
+      - SERVICE_NAME=Resource
+    networks:
+      - distributed_net
+
+networks:
+  distributed_net:
+    driver: bridge

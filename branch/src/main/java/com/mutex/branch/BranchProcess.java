@@ -1,59 +1,85 @@
 package com.mutex.branch;
 
-import java.util.Random;
-import java.util.concurrent.TimeUnit;
+import java.io.*;
+import java.net.*;
 
 public class BranchProcess {
-    private static final String COORDINATOR_HOST = "coordinator";
-    private static final int COORDINATOR_PORT = 6000;
-    private static final int RESOURCE_COUNT = 2;
+    private final String branchName;
+    private final String coordinatorHost;
+    private final int coordinatorPort;
+    private Socket socket;
+    private PrintWriter out;
+    private BufferedReader in;
+    private final BranchGUIListener guiListener;
 
-    private String branchName;
-    private ClientSocket clientSocket;
-    private Random random;
-    private BranchGUIListener guiListener; // Interface for GUI updates
-
-    public BranchProcess(String branchName, BranchGUIListener guiListener) {
+    public BranchProcess(String branchName, String coordinatorHost, int coordinatorPort, BranchGUIListener guiListener) {
         this.branchName = branchName;
-        this.clientSocket = new ClientSocket(COORDINATOR_HOST, COORDINATOR_PORT);
-        this.random = new Random();
+        this.coordinatorHost = coordinatorHost;
+        this.coordinatorPort = coordinatorPort;
         this.guiListener = guiListener;
     }
 
-    public void requestResource() {
+    public boolean connect() {
+        try {
+            socket = new Socket(coordinatorHost, coordinatorPort);
+            out = new PrintWriter(socket.getOutputStream(), true);
+            in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+            return true;
+        } catch (IOException e) {
+            guiListener.updateStatus("Failed to connect to Coordinator");
+            return false;
+        }
+    }
+
+    public void requestResource(int resourceId) {
         new Thread(() -> {
-            int resourceId = random.nextInt(RESOURCE_COUNT) + 1;
             guiListener.updateStatus("Requesting Resource " + resourceId);
 
-            if (!clientSocket.connect()) {
-                guiListener.updateStatus("Connection Failed");
+            if (!ensureConnected()) {
                 return;
             }
 
-            String response = clientSocket.sendMessage("REQUEST:" + branchName + ":" + resourceId);
+            String response = sendMessage("REQUEST:" + branchName + ":" + resourceId);
             if ("GRANTED".equals(response)) {
-                guiListener.updateStatus("Access Granted");
-                guiListener.updateResource("Resource: " + resourceId);
-
-                // Simulate working on resource
-                try {
-                    TimeUnit.SECONDS.sleep(random.nextInt(3) + 2);
-                } catch (InterruptedException ignored) {}
-
-                clientSocket.sendMessage("RELEASE:" + branchName + ":" + resourceId);
-                guiListener.updateStatus("Released Resource");
-                guiListener.updateResource("Resource: None");
-            } else {
-                guiListener.updateStatus("Request Queued");
+                guiListener.updateStatus("Resource " + resourceId + " Granted");
+                guiListener.updateResource(resourceId, "Held");
+            } else if ("QUEUED".equals(response)) {
+                guiListener.updateStatus("Waiting for Resource " + resourceId);
             }
-
-            clientSocket.close();
         }).start();
     }
 
-    public static void main(String[] args) {
-        String branchName = (args.length > 0) ? args[0] : "bRanch#" + new Random().nextInt(100);
-        BranchGUI gui = new BranchGUI(branchName);
-        new BranchProcess(branchName, gui);
+    public void releaseResource(int resourceId) {
+        new Thread(() -> {
+            guiListener.updateStatus("Releasing Resource " + resourceId);
+
+            if (!ensureConnected()) {
+                return;
+            }
+
+            String response = sendMessage("RELEASE:" + branchName + ":" + resourceId);
+            if ("RELEASE_SUCCESS".equals(response)) {
+                guiListener.updateStatus("Resource " + resourceId + " Released");
+                guiListener.updateResource(resourceId, "Available");
+            } else {
+                guiListener.updateStatus("Error Releasing Resource: " + response);
+            }
+        }).start();
+    }
+
+    private String sendMessage(String message) {
+        try {
+            out.println(message);
+            return in.readLine();
+        } catch (IOException e) {
+            return "ERROR";
+        }
+    }
+
+    private boolean ensureConnected() {
+        if (socket == null || socket.isClosed()) {
+            return connect();
+        }
+        return true;
     }
 }
